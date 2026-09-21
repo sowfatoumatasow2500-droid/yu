@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase/client";
 import type { Database } from "@/lib/types/database";
 
@@ -45,34 +45,51 @@ export interface TeacherPortalData {
   refresh: () => void;
 }
 
+interface CachedData {
+  teacher: Teacher | null;
+  classes: TeacherClassInfo[];
+  schedules: TeacherSchedule[];
+  assessments: TeacherAssessment[];
+  attendance: (Attendance & { schedules?: TeacherSchedule })[];
+  documents: Document[];
+  notifications: Notification[];
+}
+
+let cache: CachedData | null = null;
+
 export function useTeacherData(): TeacherPortalData {
-  const [teacher, setTeacher] = useState<Teacher | null>(null);
-  const [classes, setClasses] = useState<TeacherClassInfo[]>([]);
-  const [schedules, setSchedules] = useState<TeacherSchedule[]>([]);
-  const [assessments, setAssessments] = useState<TeacherAssessment[]>([]);
-  const [attendance, setAttendance] = useState<(Attendance & { schedules?: TeacherSchedule })[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [teacher, setTeacher] = useState<Teacher | null>(cache?.teacher ?? null);
+  const [classes, setClasses] = useState<TeacherClassInfo[]>(cache?.classes ?? []);
+  const [schedules, setSchedules] = useState<TeacherSchedule[]>(cache?.schedules ?? []);
+  const [assessments, setAssessments] = useState<TeacherAssessment[]>(cache?.assessments ?? []);
+  const [attendance, setAttendance] = useState<(Attendance & { schedules?: TeacherSchedule })[]>(cache?.attendance ?? []);
+  const [documents, setDocuments] = useState<Document[]>(cache?.documents ?? []);
+  const [notifications, setNotifications] = useState<Notification[]>(cache?.notifications ?? []);
+  const [loading, setLoading] = useState(cache === null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const initializedRef = useRef(false);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      if (!initializedRef.current && cache) {
+        initializedRef.current = true;
+      }
+      const hasCache = cache !== null;
+      if (!hasCache) setLoading(true);
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) { setLoading(false); return; }
+        if (!user) { if (!cancelled) setLoading(false); return; }
 
         const { data: teacherData } = await supabase
           .from("teachers")
           .select("*")
           .eq("profile_id", user.id)
           .maybeSingle();
-        if (cancelled || !teacherData) { setLoading(false); return; }
-        setTeacher(teacherData);
+        if (cancelled || !teacherData) { if (!cancelled) setLoading(false); return; }
+        if (!hasCache) setTeacher(teacherData);
 
         const [schRes, asmtRes, attRes, docRes, notifRes] = await Promise.all([
           supabase.from("schedules").select("*, classes(name), subjects(name, code)").eq("teacher_id", teacherData.id).order("day_of_week", { ascending: true }).order("start_time", { ascending: true }),
@@ -84,13 +101,21 @@ export function useTeacherData(): TeacherPortalData {
 
         if (cancelled) return;
 
-        setSchedules(schRes.data ?? []);
-        setAssessments(asmtRes.data ?? []);
-        setAttendance(attRes.data ?? []);
-        setDocuments((docRes.data ?? []).map((d: unknown) => (d as { documents: Document }).documents).filter(Boolean));
-        setNotifications(notifRes.data ?? []);
+        const newSchedules = schRes.data ?? [];
+        const newAssessments = asmtRes.data ?? [];
+        const newAttendance = attRes.data ?? [];
+        const newDocuments = (docRes.data ?? []).map((d: unknown) => (d as { documents: Document }).documents).filter(Boolean);
+        const newNotifications = notifRes.data ?? [];
 
-        const classIds = Array.from(new Set((schRes.data ?? []).map((s) => s.class_id)));
+        setTeacher(teacherData);
+        setSchedules(newSchedules);
+        setAssessments(newAssessments);
+        setAttendance(newAttendance);
+        setDocuments(newDocuments);
+        setNotifications(newNotifications);
+
+        const classIds = Array.from(new Set(newSchedules.map((s) => s.class_id)));
+        let newClasses: TeacherClassInfo[] = [];
         if (classIds.length > 0) {
           const { data: classRows } = await supabase
             .from("classes")
@@ -104,7 +129,7 @@ export function useTeacherData(): TeacherPortalData {
               .select("*", { count: "exact", head: true })
               .eq("class_id", c.id)
               .eq("status", "active");
-            const scheduleCount = (schRes.data ?? []).filter((s) => s.class_id === c.id).length;
+            const scheduleCount = newSchedules.filter((s) => s.class_id === c.id).length;
             classInfos.push({
               id: c.id,
               name: c.name,
@@ -115,7 +140,20 @@ export function useTeacherData(): TeacherPortalData {
               scheduleCount,
             });
           }
-          if (!cancelled) setClasses(classInfos);
+          newClasses = classInfos;
+        }
+        if (!cancelled) {
+          setClasses(newClasses);
+
+          cache = {
+            teacher: teacherData,
+            classes: newClasses,
+            schedules: newSchedules,
+            assessments: newAssessments,
+            attendance: newAttendance,
+            documents: newDocuments,
+            notifications: newNotifications,
+          };
         }
       } catch {
         // ignore

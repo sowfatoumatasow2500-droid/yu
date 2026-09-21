@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase/client";
 import type { Database } from "@/lib/types/database";
 
@@ -59,35 +59,56 @@ export interface StudentPortalData {
   refresh: () => void;
 }
 
+interface CachedData {
+  student: Student | null;
+  enrollments: EnrollmentWithRelations[];
+  schedules: ScheduleWithRelations[];
+  attendance: (Attendance & { schedules?: ScheduleWithRelations })[];
+  grades: GradeWithAssessment[];
+  paymentPlans: PlanWithRelations[];
+  installments: Record<string, Installment[]>;
+  payments: Record<string, Payment[]>;
+  documents: Document[];
+  notifications: Notification[];
+  certificates: (Certificate & { courses?: { name: string } })[];
+}
+
+let cache: CachedData | null = null;
+
 export function useStudentData(): StudentPortalData {
-  const [student, setStudent] = useState<Student | null>(null);
-  const [enrollments, setEnrollments] = useState<EnrollmentWithRelations[]>([]);
-  const [schedules, setSchedules] = useState<ScheduleWithRelations[]>([]);
-  const [attendance, setAttendance] = useState<(Attendance & { schedules?: ScheduleWithRelations })[]>([]);
-  const [grades, setGrades] = useState<GradeWithAssessment[]>([]);
-  const [paymentPlans, setPaymentPlans] = useState<PlanWithRelations[]>([]);
-  const [installments, setInstallments] = useState<Record<string, Installment[]>>({});
-  const [payments, setPayments] = useState<Record<string, Payment[]>>({});
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [certificates, setCertificates] = useState<(Certificate & { courses?: { name: string } })[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [student, setStudent] = useState<Student | null>(cache?.student ?? null);
+  const [enrollments, setEnrollments] = useState<EnrollmentWithRelations[]>(cache?.enrollments ?? []);
+  const [schedules, setSchedules] = useState<ScheduleWithRelations[]>(cache?.schedules ?? []);
+  const [attendance, setAttendance] = useState<(Attendance & { schedules?: ScheduleWithRelations })[]>(cache?.attendance ?? []);
+  const [grades, setGrades] = useState<GradeWithAssessment[]>(cache?.grades ?? []);
+  const [paymentPlans, setPaymentPlans] = useState<PlanWithRelations[]>(cache?.paymentPlans ?? []);
+  const [installments, setInstallments] = useState<Record<string, Installment[]>>(cache?.installments ?? {});
+  const [payments, setPayments] = useState<Record<string, Payment[]>>(cache?.payments ?? {});
+  const [documents, setDocuments] = useState<Document[]>(cache?.documents ?? []);
+  const [notifications, setNotifications] = useState<Notification[]>(cache?.notifications ?? []);
+  const [certificates, setCertificates] = useState<(Certificate & { courses?: { name: string } })[]>(cache?.certificates ?? []);
+  const [loading, setLoading] = useState(cache === null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const initializedRef = useRef(false);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      if (!initializedRef.current && cache) {
+        initializedRef.current = true;
+      }
+      const hasCache = cache !== null;
+      if (!hasCache) setLoading(true);
       try {
         const { data: studentData } = await supabase
           .from("students")
           .select("*")
           .eq("profile_id", (await supabase.auth.getUser()).data.user?.id ?? "")
           .maybeSingle();
-        if (cancelled || !studentData) { setLoading(false); return; }
-        setStudent(studentData);
+        if (cancelled || !studentData) { if (!cancelled) setLoading(false); return; }
+        if (!hasCache) setStudent(studentData);
 
         const sid = studentData.id;
 
@@ -104,18 +125,28 @@ export function useStudentData(): StudentPortalData {
 
         if (cancelled) return;
 
-        setEnrollments(enrRes.data ?? []);
-        setSchedules(schRes.data ?? []);
-        setAttendance(attRes.data ?? []);
-        setGrades(gradeRes.data ?? []);
-        setPaymentPlans(planRes.data ?? []);
-        setDocuments((docRes.data ?? []).map((d: unknown) => (d as { documents: Document }).documents).filter(Boolean));
-        setNotifications(notifRes.data ?? []);
-        setCertificates(certRes.data ?? []);
+        const newEnrollments = enrRes.data ?? [];
+        const newSchedules = schRes.data ?? [];
+        const newAttendance = attRes.data ?? [];
+        const newGrades = gradeRes.data ?? [];
+        const newPaymentPlans = planRes.data ?? [];
+        const newDocuments = (docRes.data ?? []).map((d: unknown) => (d as { documents: Document }).documents).filter(Boolean);
+        const newNotifications = notifRes.data ?? [];
+        const newCertificates = certRes.data ?? [];
+
+        setStudent(studentData);
+        setEnrollments(newEnrollments);
+        setSchedules(newSchedules);
+        setAttendance(newAttendance);
+        setGrades(newGrades);
+        setPaymentPlans(newPaymentPlans);
+        setDocuments(newDocuments);
+        setNotifications(newNotifications);
+        setCertificates(newCertificates);
 
         const instMap: Record<string, Installment[]> = {};
         const payMap: Record<string, Payment[]> = {};
-        for (const plan of planRes.data ?? []) {
+        for (const plan of newPaymentPlans) {
           const { data: insts } = await supabase.from("installments").select("*").eq("payment_plan_id", plan.id).order("installment_number", { ascending: true });
           instMap[plan.id] = insts ?? [];
           const instIds = (insts ?? []).map((i) => i.id);
@@ -126,7 +157,24 @@ export function useStudentData(): StudentPortalData {
             payMap[plan.id] = [];
           }
         }
-        if (!cancelled) { setInstallments(instMap); setPayments(payMap); }
+        if (!cancelled) {
+          setInstallments(instMap);
+          setPayments(payMap);
+
+          cache = {
+            student: studentData,
+            enrollments: newEnrollments,
+            schedules: newSchedules,
+            attendance: newAttendance,
+            grades: newGrades,
+            paymentPlans: newPaymentPlans,
+            installments: instMap,
+            payments: payMap,
+            documents: newDocuments,
+            notifications: newNotifications,
+            certificates: newCertificates,
+          };
+        }
       } catch {
         // ignore
       } finally {

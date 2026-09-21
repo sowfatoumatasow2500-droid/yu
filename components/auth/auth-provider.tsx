@@ -115,6 +115,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // call that can race with the getSession path and overwrite valid roles.
       if (event === "INITIAL_SESSION") return;
 
+      // TOKEN_REFRESHED: the Supabase client already updated its internal
+      // token. Our React session/user/profile/roles/permissions are all
+      // unchanged — updating session state here would trigger a cascade of
+      // re-renders across every consumer and cause the "Chargement…" screen
+      // when returning to a browser tab. Skip it entirely.
+      if (event === "TOKEN_REFRESHED") return;
+
       setSession(s);
       setUser(s?.user ?? null);
 
@@ -127,9 +134,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Only refetch profile/roles on actual sign-in.
-      // TOKEN_REFRESHED (fired when returning to a tab) just updates the
-      // session token — profile and roles don't change, so we keep existing
-      // data and avoid an unnecessary loading screen + refetch.
       if (event === "SIGNED_IN") {
         setLoading(true);
         await loadUserData(s.user.id);
