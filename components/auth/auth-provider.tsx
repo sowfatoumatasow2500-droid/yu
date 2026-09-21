@@ -117,18 +117,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setSession(s);
       setUser(s?.user ?? null);
-      if (s?.user && event !== "SIGNED_OUT") {
-        // Reset loading for SIGNED_IN so the UI waits for roles before rendering.
-        // Without this, loading stays false (set by the earlier getSession→null
-        // path) and the dashboard renders with empty roles.
-        if (event === "SIGNED_IN") setLoading(true);
-        await loadUserData(s.user.id);
-      } else {
+
+      if (event === "SIGNED_OUT" || !s?.user) {
         setProfile(null);
         setRoles([]);
         setPermissions([]);
+        if (mounted) setLoading(false);
+        return;
       }
-      if (mounted) setLoading(false);
+
+      // Only refetch profile/roles on actual sign-in.
+      // TOKEN_REFRESHED (fired when returning to a tab) just updates the
+      // session token — profile and roles don't change, so we keep existing
+      // data and avoid an unnecessary loading screen + refetch.
+      if (event === "SIGNED_IN") {
+        setLoading(true);
+        await loadUserData(s.user.id);
+        if (mounted) setLoading(false);
+      }
     });
 
     return () => {
