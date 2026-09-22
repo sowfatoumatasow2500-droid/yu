@@ -33,6 +33,7 @@ interface InstallmentDraft {
   label: string;
   amount: string;
   due_date: string;
+  installment_type: string;
 }
 
 interface PaymentPlanFormDialogProps {
@@ -53,6 +54,8 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
   const [courseId, setCourseId] = useState("");
   const [academicYearId, setAcademicYearId] = useState("");
   const [totalAmount, setTotalAmount] = useState("");
+  const [enrollmentFee, setEnrollmentFee] = useState("");
+  const [tuitionAmount, setTuitionAmount] = useState("");
   const [currency, setCurrency] = useState("XOF");
   const [installmentCount, setInstallmentCount] = useState(1);
   const [installments, setInstallments] = useState<InstallmentDraft[]>([]);
@@ -86,6 +89,8 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
       setCourseId(paymentPlan.course_id);
       setAcademicYearId(paymentPlan.academic_year_id);
       setTotalAmount(String(paymentPlan.total_amount));
+      setEnrollmentFee(String(paymentPlan.enrollment_fee ?? 0));
+      setTuitionAmount(String(paymentPlan.tuition_amount ?? 0));
       setCurrency(paymentPlan.currency);
       if (paymentPlan) {
         supabase
@@ -99,10 +104,11 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
                 label: d.label,
                 amount: String(d.amount_due),
                 due_date: d.due_date,
+                installment_type: (d as { installment_type?: string }).installment_type ?? "custom",
               })));
               setInstallmentCount(data.length);
             } else {
-              setInstallments([{ label: "Tranche 1", amount: String(paymentPlan.total_amount), due_date: new Date().toISOString().split("T")[0] }]);
+              setInstallments([{ label: "Tranche 1", amount: String(paymentPlan.total_amount), due_date: new Date().toISOString().split("T")[0], installment_type: "custom" }]);
               setInstallmentCount(1);
             }
           });
@@ -112,9 +118,11 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
       setCourseId("");
       setAcademicYearId("");
       setTotalAmount("");
+      setEnrollmentFee("");
+      setTuitionAmount("");
       setCurrency("XOF");
       setInstallmentCount(1);
-      setInstallments([{ label: "Tranche 1", amount: "", due_date: new Date().toISOString().split("T")[0] }]);
+      setInstallments([{ label: "Tranche 1", amount: "", due_date: new Date().toISOString().split("T")[0], installment_type: "custom" }]);
       setErrors({});
     }
   }, [open, paymentPlan]);
@@ -123,7 +131,7 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
     if (!open) return;
     const count = Math.max(1, installmentCount);
     const next = Array.from({ length: count }, (_, i) =>
-      installments[i] ?? { label: `Tranche ${i + 1}`, amount: "", due_date: new Date().toISOString().split("T")[0] }
+      installments[i] ?? { label: `Tranche ${i + 1}`, amount: "", due_date: new Date().toISOString().split("T")[0], installment_type: "custom" }
     );
     setInstallments(next);
   }, [installmentCount, open]);
@@ -132,8 +140,12 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
     if (!open || paymentPlan) return;
     const selected = courses.find((c) => c.id === courseId);
     if (selected && !totalAmount) {
-      const total = selected.tuition_fee + selected.enrollment_fee;
+      const enrollFee = selected.enrollment_fee ?? 0;
+      const tuition = selected.tuition_fee ?? 0;
+      const total = tuition + enrollFee;
       setTotalAmount(String(total));
+      setEnrollmentFee(String(enrollFee));
+      setTuitionAmount(String(tuition));
     }
   }, [courseId, courses, open, paymentPlan, totalAmount]);
 
@@ -169,6 +181,8 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
           .from("payment_plans")
           .update({
             total_amount: Number(totalAmount),
+            enrollment_fee: Number(enrollmentFee) || 0,
+            tuition_amount: Number(tuitionAmount) || 0,
             currency,
           })
           .eq("id", paymentPlan.id);
@@ -200,6 +214,7 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
               label: inst.label,
               amount_due: Number(inst.amount),
               due_date: inst.due_date,
+              installment_type: inst.installment_type || "custom",
             });
           }
         }
@@ -222,6 +237,8 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
             academic_year_id: academicYearId,
             enrollment_id: enrollment?.id ?? null,
             total_amount: Number(totalAmount),
+            enrollment_fee: Number(enrollmentFee) || 0,
+            tuition_amount: Number(tuitionAmount) || 0,
             currency,
             status: "pending",
           })
@@ -240,6 +257,7 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
             label: inst.label,
             amount_due: Number(inst.amount),
             due_date: inst.due_date,
+            installment_type: inst.installment_type || "custom",
           });
         }
 
@@ -327,6 +345,30 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
               {errors.totalAmount && <p className="text-xs text-destructive">{errors.totalAmount}</p>}
             </div>
             <div className="space-y-2">
+              <Label htmlFor="enrollment_fee">Frais d'inscription</Label>
+              <Input
+                id="enrollment_fee"
+                type="number"
+                step="0.01"
+                value={enrollmentFee}
+                onChange={(e) => setEnrollmentFee(e.target.value)}
+                disabled={loading}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tuition_amount">Scolarité (mensualités)</Label>
+              <Input
+                id="tuition_amount"
+                type="number"
+                step="0.01"
+                value={tuitionAmount}
+                onChange={(e) => setTuitionAmount(e.target.value)}
+                disabled={loading}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="installment_count">Nombre de tranches</Label>
               <Input
                 id="installment_count"
@@ -344,7 +386,7 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
             <Label>Tranches</Label>
             {errors.installments && <p className="text-xs text-destructive">{errors.installments}</p>}
             {installments.map((inst, i) => (
-              <div key={i} className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end p-3 rounded-lg border">
+              <div key={i} className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end p-3 rounded-lg border">
                 <div className="space-y-1">
                   <Label className="text-xs">Libellé</Label>
                   <Input
@@ -357,6 +399,25 @@ export function PaymentPlanFormDialog({ open, onOpenChange, paymentPlan, onSaved
                     disabled={loading}
                     placeholder={`Tranche ${i + 1}`}
                   />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Type</Label>
+                  <Select
+                    value={inst.installment_type}
+                    onValueChange={(v) => {
+                      const next = [...installments];
+                      next[i] = { ...next[i], installment_type: v };
+                      setInstallments(next);
+                    }}
+                    disabled={loading}
+                  >
+                    <SelectTrigger className="text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="enrollment">Inscription</SelectItem>
+                      <SelectItem value="monthly">Mensualité</SelectItem>
+                      <SelectItem value="custom">Libre</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1">
                   <Label className="text-xs">Montant</Label>

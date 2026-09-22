@@ -580,6 +580,8 @@ export interface Database {
           academic_year_id: string;
           enrollment_id: string | null;
           total_amount: number;
+          enrollment_fee: number;
+          tuition_amount: number;
           currency: "XOF" | "EUR";
           status: "pending" | "partially_paid" | "paid" | "overdue" | "cancelled";
           created_at: string;
@@ -593,6 +595,8 @@ export interface Database {
           academic_year_id: string;
           enrollment_id?: string | null;
           total_amount: number;
+          enrollment_fee?: number;
+          tuition_amount?: number;
           currency?: string;
           status?: string;
           created_at?: string;
@@ -612,6 +616,7 @@ export interface Database {
           amount_paid: number;
           due_date: string;
           status: "pending" | "partially_paid" | "paid" | "overdue" | "cancelled";
+          installment_type: "enrollment" | "monthly" | "custom";
           created_at: string;
           updated_at: string;
         };
@@ -626,6 +631,7 @@ export interface Database {
           amount_paid?: number;
           due_date: string;
           status?: string;
+          installment_type?: string;
           created_at?: string;
           updated_at?: string;
         };
@@ -721,6 +727,45 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["refunds"]["Insert"]>;
+      };
+      payment_adjustments: {
+        Row: {
+          id: string;
+          institution_id: string;
+          payment_plan_id: string;
+          student_id: string;
+          academic_year_id: string;
+          adjustment_type: "discount" | "exemption";
+          scope: "enrollment_fee" | "tuition" | "total";
+          amount_type: "percentage" | "fixed_amount";
+          amount: number;
+          reason: string | null;
+          status: "active" | "cancelled";
+          created_by: string | null;
+          cancelled_by: string | null;
+          cancelled_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          institution_id: string;
+          payment_plan_id: string;
+          student_id: string;
+          academic_year_id: string;
+          adjustment_type: string;
+          scope?: string;
+          amount_type?: string;
+          amount: number;
+          reason?: string | null;
+          status?: string;
+          created_by?: string | null;
+          cancelled_by?: string | null;
+          cancelled_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["payment_adjustments"]["Insert"]>;
       };
       expenses: {
         Row: {
